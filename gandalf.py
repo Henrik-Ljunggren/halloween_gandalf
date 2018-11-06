@@ -15,6 +15,46 @@ from luma.core.legacy import text, show_message
 from luma.core.legacy.font import proportional, CP437_FONT, TINY_FONT, SINCLAIR_FONT, LCD_FONT
 
 import pygame
+import speech_recognition as sr
+import RPi.GPIO as GPIO
+import time
+import random
+
+centerDuty = 5.0
+maxDeltaDuty = 0.6
+
+
+
+
+def waitForGuest():
+    while True:
+        i = GPIO.input(27)
+        if i==1:
+            print("GUEST")
+            return
+        else:
+            print("no one here")
+        time.sleep(0.5)
+
+def setupServo():
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(27,GPIO.IN)
+    GPIO.setup(18,GPIO.OUT)
+
+    p = GPIO.PWM(18, 50)
+    p.start(5.0)
+    #time.sleep(1)
+    p.ChangeDutyCycle(0)
+    return p
+
+def moveServo_random_pos(p):
+    #pos = random.random()*maxDeltaDuty+centerDuty
+    pos = random.choice([5.2,4.8])
+    #print("pos=",pos)
+    p.ChangeDutyCycle(pos)
+    
+
+
 
 def drawEyeBalls(draw, x,y,squint=False):
 
@@ -97,7 +137,31 @@ def test(device):
             drawEyeBrow(draw, 0, isRightEye=True)
             time.sleep(0.3)
             
-    
+            
+            
+
+def moveEyes_random(device, eyeX, eyeY, squint, brow1, brow2):
+    #Left center left center
+    randomFeature = random.choice(["eyeX","eyeY","brow1","brow2","squint"])
+
+
+    if randomFeature == "eyeX":
+        eyeX = random.choice([2,3,3,3,4])
+    elif randomFeature == "eyeY":
+        eyeY = random.choice([4,5,5,5,6])
+    elif randomFeature == "brow1":
+        brow1 = random.choice([-1,0,0,0,1])
+    elif randomFeature == "brow2":
+        brow2 = random.choice([-1,0,0,0,1])
+    elif randomFeature == "squint":
+        squint = random.choice([True,False,False])
+
+
+    with canvas(device) as draw:
+        drawEyeBalls(draw,eyeX,eyeY,squint=squint)
+        drawEyeBrow(draw, brow1, isRightEye=False)
+        drawEyeBrow(draw, brow2, isRightEye=True)
+    return eyeX, eyeY, squint, brow1, brow2
 
     
 def demo(n, block_orientation, rotate):
@@ -112,10 +176,9 @@ def demo(n, block_orientation, rotate):
     pygame.mixer.music.play()
 
 
-    time.sleep(1)
+    #time.sleep(1)
     
-    pygame.mixer.music.load("mellon.wav")
-    pygame.mixer.music.play()
+ 
 
 
     test(device)
@@ -135,18 +198,151 @@ def demo(n, block_orientation, rotate):
     #        text(draw, (0, 0), chr(x), fill="white")
     #        time.sleep(0.1)
 
+def analyseAnswer(audio, r):
+    
+    try:
+        answer = r.recognize_google(audio)
+        return answer, True
+    except sr.RequestError:
+        print("API unavailable")
+        return None, False
+    except sr.UnknownValueError:
+        print("Unable to recognize speech")
+        return None, False
+    
+
+def listenForAnswer(source, r):
+    try:
+        audio = r.listen(source, timeout=10, phrase_time_limit=3)
+        return audio, True
+    except sr.WaitTimeoutError:
+        print("You took to long")
+        return None, False
+
+
+def gandalfAtTheGate(p, device):
+    device.contrast(50)
+    r = sr.Recognizer()
+
+    mic = sr.Microphone()
+
+    #print(sr.Microphone.list_microphone_names())
+    #p.stop()
+    
+    with mic as source:
+        print("Adjusting..")
+        r.adjust_for_ambient_noise(source)
+        print("Adjusting")
+        
+        while True:
+            time.sleep(10)
+            waitForGuest()
+            
+            print("Guest arrived!")
+                  
+            eyeX = 3
+            eyeY = 5
+            squint = False
+            brow1 = 0
+            brow2 = 0
+
+            
+ 
+            
+            ##### Play welcome speech and riddle
+            #----
+            pygame.init()
+            
+            pygame.mixer.music.load("sounds/intro.wav")
+            pygame.mixer.music.play()
+            #p.start(5.0)
+            while pygame.mixer.music.get_busy() == True:
+                moveServo_random_pos(p)
+                eyeX, eyeY, squint, brow1, brow2 = moveEyes_random(device, eyeX, eyeY, squint, brow1, brow2)
+                time.sleep(0.2)
+            time.sleep(0.5)
+            
+            
+            riddle = random.choice(["map","fire","darkness"])
+            
+            pygame.mixer.music.load("sounds/"+riddle+".wav")
+            pygame.mixer.music.play()
+            #p.start(5.0)
+            while pygame.mixer.music.get_busy() == True:
+                #moveServo_random_pos(p)
+                time.sleep(0.1)
+            #p.stop()
+            p.ChangeDutyCycle(0)
+            #Listen for answer
+            audio, sucess = listenForAnswer(source, r)
+            
+            correct = False
+            if sucess:
+                answer, sucess2 = analyseAnswer(audio, r)
+                #answer = "fee"
+                #sucess2 = True
+
+                print(answer)
+                if sucess2:
+                    if riddle in answer.lower():
+                        correct = True
+                else:
+                    print("could not understand you")
+            else:
+                print("could not here you")
+                
+            #Respond
+            if correct:
+                pygame.mixer.music.load("sounds/correct.wav")
+                pygame.mixer.music.play()
+                #p.start(5.0)
+                while pygame.mixer.music.get_busy() == True:
+                    moveServo_random_pos(p)
+                    time.sleep(0.1)
+                p.ChangeDutyCycle(0)
+            else:
+                #p.start(5.0)
+                pygame.mixer.music.load("sounds/incorrect.wav")
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy() == True:
+                    moveServo_random_pos(p)
+                    time.sleep(0.1)
+                pygame.mixer.music.load("sounds/shallnotpass.wav")
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy() == True:
+                    moveServo_random_pos(p)
+                    time.sleep(0.1)
+                pygame.mixer.music.load("sounds/doasyourwish.wav")
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy() == True:
+                    moveServo_random_pos(p)
+                    time.sleep(0.1)
+                p.ChangeDutyCycle(0)
+            print("DONE")
+    
+
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='matrix_demo arguments',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description='matrix_demo arguments',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('--cascaded', '-n', type=int, default=2, help='Number of cascaded MAX7219 LED matrices')
     parser.add_argument('--block-orientation', type=int, default=90, choices=[0, 90, -90], help='Corrects block orientation when wired vertically')
     parser.add_argument('--rotate', type=int, default=0, choices=[0, 1, 2, 3], help='Rotate display 0=0°, 1=90°, 2=180°, 3=270°')
-
     args = parser.parse_args()
+    #GPIO.cleanup()
+    # create matrix device
+    serial = spi(port=0, device=0, gpio=noop())
+    device = max7219(serial, cascaded=args.cascaded or 1, block_orientation=args.block_orientation, rotate=args.rotate or 0)
+    print("Created device")
 
+    p = setupServo()
+    #p.start(5.0)
+    #p.stop()
+    # p=0
     try:
-        demo(args.cascaded, args.block_orientation, args.rotate)
+       gandalfAtTheGate(p,device)
     except KeyboardInterrupt:
         pass
+    #p.stop()
+    GPIO.cleanup()
